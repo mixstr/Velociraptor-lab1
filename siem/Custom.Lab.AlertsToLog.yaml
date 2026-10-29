@@ -1,0 +1,47 @@
+name: Custom.Lab.AlertsToLog
+description: |
+  Lightweight SIEM integration (lab task 10) without third-party software.
+  Server monitoring artifact that watches completed collections
+  (System.Flow.Completion). When one of the Custom.Lab.* detection
+  rules returns rows, every row becomes an alert that is:
+    * appended to the AlertLog file on the server as JSON Lines
+      (one line = one event, ingestible by Wazuh / ELK / Splunk);
+    * shown on the Server Events page (simple dashboard).
+author: Sokolov S.A., KT-23-04
+type: SERVER_EVENT
+parameters:
+  - name: ArtifactRegex
+    type: regex
+    default: '^Custom\.Lab\.'
+    description: Artifacts treated as detection rules.
+  - name: AlertLog
+    default: /opt/velociraptor/logs/lab-alerts.jsonl
+    description: Alert log file on the server.
+sources:
+  - query: |
+      LET completions = SELECT * FROM watch_monitoring(
+            artifact="System.Flow.Completion")
+        WHERE Flow.artifacts_with_results =~ ArtifactRegex
+
+      LET alerts = SELECT * FROM foreach(row=completions,
+        query={
+          SELECT * FROM foreach(
+            row=filter(list=Flow.artifacts_with_results, regex=ArtifactRegex),
+            query={
+              SELECT *,
+                     timestamp(epoch=now()) AS AlertTime,
+                     "high" AS Severity,
+                     _value AS Rule,
+                     ClientId,
+                     client_info(client_id=ClientId).os_info.fqdn AS Host,
+                     Flow.session_id AS FlowId
+              FROM source(client_id=ClientId,
+                          flow_id=Flow.session_id,
+                          artifact=_value)
+            })
+        })
+
+      SELECT AlertTime, Severity, Rule, Host, ClientId, FlowId,
+             DetectionReason
+      FROM write_jsonl(filename=AlertLog, append=TRUE, max_time=1,
+                       query=alerts)

@@ -1,0 +1,39 @@
+name: Custom.Lab.NewInTemp
+description: |
+  Правило 1 (new-in-temp). Ищет исполняемые файлы и скрипты, СОЗДАННЫЕ
+  за последние LookbackMinutes минут во временных каталогах Windows
+  (%TEMP% всех пользователей и C:\Windows\Temp).
+  Для каждой находки считает SHA-256 и проверяет цифровую подпись.
+  Находка — повод для расследования, а не доказательство вредоносности.
+author: Соколов С.А., КТ-23-04
+type: CLIENT
+parameters:
+  - name: LookbackMinutes
+    type: int64
+    default: "60"
+    description: Окно поиска по времени создания файла (Btime), в минутах.
+  - name: ExtRegex
+    type: regex
+    default: '\.(exe|dll|scr|ps1|bat|cmd|vbs|js)$'
+    description: Расширения, которые считаются подозрительными.
+sources:
+  - name: NewExecutablesInTemp
+    precondition: SELECT OS FROM info() WHERE OS = 'windows'
+    query: |
+      LET Cutoff <= timestamp(epoch=now() - LookbackMinutes * 60)
+
+      LET Hits = SELECT OSPath, Name, Size, Btime, Mtime
+        FROM glob(globs=[
+              "C:/Users/*/AppData/Local/Temp/**",
+              "C:/Windows/Temp/**"
+            ], accessor="auto")
+        WHERE NOT IsDir
+          AND Name =~ ExtRegex
+          AND Btime >= Cutoff
+
+      SELECT timestamp(epoch=now()) AS DetectedAt,
+             OSPath, Name, Size, Btime, Mtime,
+             hash(path=OSPath).SHA256 AS SHA256,
+             authenticode(filename=OSPath).Trusted AS Signature,
+             "new_executable_in_temp" AS DetectionReason
+      FROM Hits

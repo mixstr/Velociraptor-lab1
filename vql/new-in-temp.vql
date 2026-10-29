@@ -1,0 +1,23 @@
+-- Правило 1: new-in-temp
+-- Новые исполняемые файлы/скрипты во временных каталогах Windows.
+-- Параметры (в артефакте Custom.Lab.NewInTemp):
+--   LookbackMinutes = 60, ExtRegex = '\.(exe|dll|scr|ps1|bat|cmd|vbs|js)$'
+LET LookbackMinutes <= 60
+LET ExtRegex <= '\\.(exe|dll|scr|ps1|bat|cmd|vbs|js)$'
+LET Cutoff <= timestamp(epoch=now() - LookbackMinutes * 60)
+
+LET Hits = SELECT OSPath, Name, Size, Btime, Mtime
+  FROM glob(globs=[
+        "C:/Users/*/AppData/Local/Temp/**",
+        "C:/Windows/Temp/**"
+      ], accessor="auto")
+  WHERE NOT IsDir
+    AND Name =~ ExtRegex
+    AND Btime >= Cutoff
+
+SELECT timestamp(epoch=now()) AS DetectedAt,
+       OSPath, Name, Size, Btime, Mtime,
+       hash(path=OSPath).SHA256 AS SHA256,
+       authenticode(filename=OSPath).Trusted AS Signature,
+       "new_executable_in_temp" AS DetectionReason
+FROM Hits

@@ -1,0 +1,21 @@
+-- Правило 3: outbound-anomaly
+-- Установленные (State=5) исходящие TCP-соединения на порты вне allowlist.
+-- Источник: WMI MSFT_NetTCPConnection; процесс — через pslist().
+LET AllowedPorts <= '^(53|80|443|8000|135|139|445|3389)$'
+LET IgnoreRemoteRegex <= '^(127\\.|::1|0\\.0\\.0\\.0)'
+
+LET Conns = SELECT LocalAddress, LocalPort, RemoteAddress, RemotePort,
+       State, OwningProcess
+  FROM wmi(namespace="ROOT\\StandardCimv2",
+           query="SELECT LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess FROM MSFT_NetTCPConnection")
+  WHERE str(str=State) =~ '^(5|Established)$'
+    AND NOT RemoteAddress =~ IgnoreRemoteRegex
+    AND NOT str(str=RemotePort) =~ AllowedPorts
+
+SELECT timestamp(epoch=now()) AS DetectedAt,
+       LocalAddress, LocalPort, RemoteAddress, RemotePort,
+       str(str=State) AS State, OwningProcess AS Pid,
+       { SELECT Name FROM pslist(pid=int(int=OwningProcess)) } AS ProcessName,
+       { SELECT CommandLine FROM pslist(pid=int(int=OwningProcess)) } AS CommandLine,
+       "outbound_nonstandard_port" AS DetectionReason
+FROM Conns

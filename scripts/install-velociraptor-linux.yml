@@ -1,0 +1,75 @@
+---
+# Лабораторная работа 1: идемпотентная установка Linux-агента Velociraptor.
+# Запуск с VR-SERVER (Ansible controller):
+#   ansible-playbook -i inventory.ini install-velociraptor-linux.yml -K
+# Пароли в playbook не хранятся; повышение прав через sudo (-K).
+- name: Idempotent Velociraptor Linux client deployment
+  hosts: linux_clients
+  gather_facts: false
+  become: true
+  vars:
+    vr_server_ip: 192.168.88.10
+    vr_server_name: velociraptor.lab
+    deb_source: "{{ playbook_dir }}/../files/velociraptor-linux-client.deb"
+    deb_remote: /var/tmp/velociraptor-linux-client.deb
+    client_package: velociraptor-client
+    client_service: velociraptor_client.service
+    client_config: /etc/velociraptor/client.config.yaml
+
+  tasks:
+    - name: Ensure velociraptor.lab resolves to the lab server
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '\svelociraptor\.lab(\s|$)'
+        line: "{{ vr_server_ip }} {{ vr_server_name }} vr-server"
+
+    - name: Check whether the client package is already installed
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${Status}", "{{ client_package }}"]
+      register: pkg_state
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Copy the client .deb only when the package is absent
+      ansible.builtin.copy:
+        src: "{{ deb_source }}"
+        dest: "{{ deb_remote }}"
+        owner: root
+        group: root
+        mode: '0600'
+      when: "'install ok installed' not in pkg_state.stdout"
+
+    - name: Install the client .deb only when the package is absent
+      ansible.builtin.apt:
+        deb: "{{ deb_remote }}"
+      when: "'install ok installed' not in pkg_state.stdout"
+
+    - name: Ensure the client service is enabled and running
+      ansible.builtin.systemd_service:
+        name: "{{ client_service }}"
+        enabled: true
+        state: started
+
+    - name: Check the client configuration file (content is not printed)
+      ansible.builtin.stat:
+        path: "{{ client_config }}"
+      register: cfg
+
+    - name: Require a regular client configuration file
+      ansible.builtin.assert:
+        that: [cfg.stat.exists, cfg.stat.isreg]
+        fail_msg: "Client configuration is missing."
+        success_msg: "Client configuration is present."
+
+    - name: Verify the service is active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ client_service }}"]
+      register: svc
+      changed_when: false
+      failed_when: svc.stdout | trim != 'active'
+      check_mode: false
+
+    - name: Show deployment result
+      ansible.builtin.debug:
+        msg: "package={{ 'already installed' if 'install ok installed' in pkg_state.stdout else 'installed in this run' }}, service={{ svc.stdout | trim }}"

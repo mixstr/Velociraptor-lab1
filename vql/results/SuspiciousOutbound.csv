@@ -1,0 +1,2 @@
+DetectedAt,LocalAddress,LocalPort,RemoteAddress,RemotePort,State,Pid,ProcessName,CommandLine,DetectionReason
+2026-10-29T22:13:21+03:00,192.168.88.20,56972,192.168.88.30,9001," 5",1744,powershell.exe,"""C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe"" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""C:\Users\user\AppData\Local\Temp\lab-beacon.ps1"" ",outbound_nonstandard_port

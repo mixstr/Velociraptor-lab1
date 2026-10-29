@@ -1,0 +1,37 @@
+-- Правило 2: persistence-delta
+-- Снимок точек автозапуска (Run/RunOnce в HKLM и HKU, папки Startup)
+-- раз в CheckSeconds секунд; возвращает добавленные записи.
+LET CheckSeconds <= 5
+
+LET RegRuns = SELECT "registry" AS Source,
+       OSPath.String AS Location,
+       Name AS Entry,
+       str(str=Data.value) AS Command
+  FROM glob(globs=[
+        '''HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run\*''',
+        '''HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce\*''',
+        '''HKEY_USERS\*\Software\Microsoft\Windows\CurrentVersion\Run\*''',
+        '''HKEY_USERS\*\Software\Microsoft\Windows\CurrentVersion\RunOnce\*'''
+      ], accessor="registry")
+  WHERE NOT IsDir
+
+LET StartupFiles = SELECT "startup_folder" AS Source,
+       OSPath.String AS Location,
+       Name AS Entry,
+       OSPath.String AS Command
+  FROM glob(globs=[
+        "C:/Users/*/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/*",
+        "C:/ProgramData/Microsoft/Windows/Start Menu/Programs/StartUp/*"
+      ], accessor="auto")
+  WHERE NOT IsDir AND Name != "desktop.ini"
+
+LET Autoruns = SELECT *,
+       format(format="%v|%v", args=[Location, Command]) AS Identity
+  FROM chain(a=RegRuns, b=StartupFiles)
+
+SELECT timestamp(epoch=now()) AS DetectedAt,
+       Source, Location, Entry, Command, Diff,
+       "autorun_added" AS DetectionReason
+FROM diff(query=Autoruns, key="Identity", period=CheckSeconds)
+WHERE Diff = "added"
+LIMIT 1
